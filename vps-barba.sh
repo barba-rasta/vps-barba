@@ -120,6 +120,8 @@ tput cuu1 && tput dl1
 apt-get install -y  curl &> /dev/null & spin 
 echo -e "${cor[2]} $text &> Complementos" 
 apt-get install -y  ruby &> /dev/null & spin
+echo -e "${cor[2]} $text &> Traductor"
+apt-get install -y  translate-shell &> /dev/null & spin 
 tput cuu1 && tput dl1
 apt install -y cowsay &> /dev/null & spin
 tput cuu1 && tput dl1
