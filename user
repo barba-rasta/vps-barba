@@ -1959,7 +1959,7 @@ force_verification() {
     read
 }
 
-# # Función baner_fun adaptada con Efectos HTML para Apps SSH/VPN
+# Función baner_fun con ASCII Art para HTTP Injector
 baner_fun() {
     clear
     echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
@@ -1976,10 +1976,10 @@ baner_fun() {
     echo -e "${cor[yellow]}  [ Vista Previa del Banner Actual ]${cor[reset]}"
     echo -e "${cor[cyan]}  ──────────────────────────────────────────────────${cor[reset]}"
     if [[ -f "$banner_file" ]]; then
-        head -15 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read -r line; do
+        head -20 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read -r line; do
             echo -e "   ${cor[white]}$line${cor[reset]}"
         done
-        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 15 ]] && echo -e "   ${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
+        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 20 ]] && echo -e "   ${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
     else
         echo -e "   ${cor[orange]}✖ $(fun_trans 'No hay ningún banner configurado actualmente')${cor[reset]}"
     fi
@@ -2000,14 +2000,14 @@ baner_fun() {
 
     case $selection in
         1)
-            local ban_ner="" ban_ner_cor="" main_color="" efecto_opt=""
+            local ban_ner="" ban_ner_cor="" main_color=""
             
             echo -e "\n${cor[cyan]}─── [ CONFIGURACIÓN PRINCIPAL ] ─────────────────────${cor[reset]}"
             echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje principal'): ${cor[reset]}"
             read -r ban_ner
             ban_ner="${ban_ner:-vps-barba}"
 
-            echo -e "\n${cor[yellow]}Color para el título vps-barba y mensaje:${cor[reset]}"
+            echo -e "\n${cor[yellow]}Selecciona el color para el mensaje secundario:${cor[reset]}"
             echo -e "  ${cor[white]}[1] Negro Puro${cor[reset]}      ${cor[red]}[2] Rojo Oscuro${cor[reset]}     ${cor[blue]}[3] Azul Oscuro${cor[reset]}"
             echo -e "  ${cor[green]}[4] Verde Oscuro${cor[reset]}    ${cor[purple]}[5] Púrpura Oscuro${cor[reset]}  ${cor[orange]}[6] Naranja Ladrillo${cor[reset]}"
             echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de color'): ${cor[reset]}"
@@ -2021,31 +2021,17 @@ baner_fun() {
                 4) main_color="#006400" ;;
                 5) main_color="#8B008B" ;;
                 6) main_color="#FF4500" ;;
-                *) main_color="#8B0000" ;;
+                *) main_color="#006400" ;;
             esac
 
-            echo -e "\n${cor[yellow]}Selecciona el efecto visual HTML para el título:${cor[reset]}"
-            echo -e "  ${cor[cyan]}[1] Texto en movimiento (Marquee/Corredizo)${cor[reset]}"
-            echo -e "  ${cor[cyan]}[2] Texto Parpadeante (Blink)${cor[reset]}"
-            echo -e "  ${cor[cyan]}[3] Texto Subrayado y Negrita (Sólido Clásico)${cor[reset]}"
-            echo -e "  ${cor[cyan]}[4] Fondo Resaltado (Marcatextos Yellow/Black)${cor[reset]}"
-            echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de efecto'): ${cor[reset]}"
-            read -r efecto_opt
-            efecto_opt="${efecto_opt:-vps-barba}"
-
-            local titulo_html=""
-            case $efecto_opt in
-                1) titulo_html="<marquee scrollamount='5'><b>★ VPS-BARBA ★</b></marquee>" ;;
-                2) titulo_html="<blink><b>★ VPS-BARBA ★</b></blink>" ;;
-                3) titulo_html="<u><b>★ VPS-BARBA ★</b></u>" ;;
-                4) titulo_html="<mark style='background-color:yellow; color:black;'><b>★ VPS-BARBA ★</b></mark>" ;;
-                *) titulo_html="<marquee scrollamount='5'><b>★ VPS-BARBA ★</b></marquee>" ;;
-            esac
-
-            # Creación del banner con efectos compatibles
+            # Banner con ASCII Art de VPS-BARBA encerrado en etiquetas <pre>
             cat <<EOF > "$banner_file"
-<font color="#000000">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
-<font color="${main_color}">${titulo_html}</font><br>
+<pre><font color="#000000">
+  __   _____  ____    ___   _   ___ ___   _   
+  \ \ / / _ \/ ___|  | __) /_\ | _ \_  ) /_\  
+   \ V /|  _/\___ \  | _ \/ _ \|   // / / _ \ 
+    \_/ |_|  |____/  |___/_/ \_\_|_/___/_/ \_\
+</font></pre>
 <font color="#000000">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
 <font color="${main_color}"><b>$ban_ner</b></font><br>
 <font color="#000000">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
@@ -2093,7 +2079,7 @@ EOF
                 fi
             done
 
-            echo -e "\n${cor[green]}✔ $(fun_trans 'Banner con efectos HTML creado con éxito')${cor[reset]}"
+            echo -e "\n${cor[green]}✔ $(fun_trans 'Banner con ASCII Art VPS-BARBA creado con éxito')${cor[reset]}"
             log_user_action "BANNER" "system" "created"
             ;;
         2)
@@ -2125,9 +2111,6 @@ EOF
     echo -ne "${cor[pink]}$(fun_trans 'Presione Enter para continuar')${cor[reset]}"
     read -r
 }
-
-
-
 
 
 
