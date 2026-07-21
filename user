@@ -1959,141 +1959,157 @@ force_verification() {
     read
 }
 
-# Función baner_fun mejorada
+# Función baner_fun completamente rediseñada y optimizada
 baner_fun() {
     clear
     echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
-    echo -e "${cor[cyan]}║         $(fun_trans 'BANNER SSH')                     ║${cor[reset]}"
+    echo -e "${cor[cyan]}║             ${cor[white]}✦ $(fun_trans 'GESTOR DE BANNER SSH') ✦${cor[cyan]}             ║${cor[reset]}"
     echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
     msg_bar
-    
+
     local banner_file=""
     if [[ -f "/etc/ssh/sshd_config" ]]; then
         banner_file=$(grep -v "^#" /etc/ssh/sshd_config | grep "Banner" | awk '{print $2}' | head -1)
     fi
     [[ -z "$banner_file" ]] && banner_file="/etc/bannerssh"
-    
-    echo -e "${cor[yellow]}$(fun_trans 'Banner actual')${cor[reset]}"
-    msg_bar
+
+    echo -e "${cor[yellow]}  [ Vista Previa del Banner Actual ]${cor[reset]}"
+    echo -e "${cor[cyan]}  ──────────────────────────────────────────────────${cor[reset]}"
     if [[ -f "$banner_file" ]]; then
-        head -10 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read line; do
-            echo -e "${cor[white]}$line${cor[reset]}"
+        head -10 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read -r line; do
+            echo -e "   ${cor[white]}$line${cor[reset]}"
         done
-        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 10 ]] && echo -e "${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
+        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 10 ]] && echo -e "   ${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
     else
-        echo -e "${cor[orange]}$(fun_trans 'No hay banner configurado')${cor[reset]}"
+        echo -e "   ${cor[orange]}✖ $(fun_trans 'No hay ningún banner configurado actualmente')${cor[reset]}"
     fi
+    echo -e "${cor[cyan]}  ──────────────────────────────────────────────────${cor[reset]}"
     msg_bar
-    
-    echo -e "${cor[green]}[1] ${cor[white]}$(fun_trans 'CREAR NUEVO BANNER')${cor[reset]}"
-    echo -e "${cor[green]}[2] ${cor[white]}$(fun_trans 'ELIMINAR BANNER')${cor[reset]}"
-    echo -e "${cor[green]}[3] ${cor[white]}$(fun_trans 'VER BANNER COMPLETO')${cor[reset]}"
+
+    echo -e "${cor[green]}  [1] ${cor[white]}❯ $(fun_trans 'CREAR NUEVO BANNER' | tr 'a-z' 'A-Z')${cor[reset]}"
+    echo -e "${cor[green]}  [2] ${cor[white]}❯ $(fun_trans 'ELIMINAR BANNER' | tr 'a-z' 'A-Z')${cor[reset]}"
+    echo -e "${cor[green]}  [3] ${cor[white]}❯ $(fun_trans 'VER BANNER COMPLETO' | tr 'a-z' 'A-Z')${cor[reset]}"
     msg_bar
-    
+
     local selection=""
     while [[ ! "$selection" =~ ^[1-3]$ ]]; do
-        echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción'): ${cor[reset]}"
-        read selection
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione una opción'): ${cor[reset]}"
+        read -r selection
+        selection="${selection:-vps-barba}"
     done
-    
+
     case $selection in
         1)
-            local ban_ner=""
+            local ban_ner="" ban_ner_cor="" main_color=""
+            
+            echo -e "\n${cor[cyan]}─── [ CONFIGURACIÓN PRINCIPAL ] ─────────────────────${cor[reset]}"
             echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje principal'): ${cor[reset]}"
-            read ban_ner
-            
-            echo -e "${cor[green]}[1] $(fun_trans 'Verde')${cor[reset]}"
-            echo -e "${cor[red]}[2] $(fun_trans 'Rojo')${cor[reset]}"
-            echo -e "${cor[blue]}[3] $(fun_trans 'Azul')${cor[reset]}"
-            echo -e "${cor[yellow]}[4] $(fun_trans 'Amarillo')${cor[reset]}"
-            echo -e "${cor[purple]}[5] $(fun_trans 'Morado')${cor[reset]}"
-            echo -e "${cor[cyan]}[6] $(fun_trans 'Cian')${cor[reset]}"
-            echo -ne "${cor[yellow]}➤ $(fun_trans 'Color'): ${cor[reset]}"
-            read ban_ner_cor
-            
-            # Crear banner
-            echo '<h1><font>=============================</font></h1>' > "$banner_file"
+            read -r ban_ner
+            ban_ner="${ban_ner:-vps-barba}"
+
+            echo -e "\n${cor[yellow]}Color para el mensaje principal:${cor[reset]}"
+            echo -e "  ${cor[green]}[1] Verde${cor[reset]}    ${cor[red]}[2] Rojo${cor[reset]}      ${cor[blue]}[3] Azul${cor[reset]}"
+            echo -e "  ${cor[yellow]}[4] Amarillo${cor[reset]} ${cor[purple]}[5] Morado${cor[reset]}    ${cor[cyan]}[6] Cian${cor[reset]}"
+            echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de color'): ${cor[reset]}"
+            read -r ban_ner_cor
+            ban_ner_cor="${ban_ner_cor:-vps-barba}"
+
             case $ban_ner_cor in
-                1) echo '<h1><font color="green">' >> "$banner_file" ;;
-                2) echo '<h1><font color="red">' >> "$banner_file" ;;
-                3) echo '<h1><font color="blue">' >> "$banner_file" ;;
-                4) echo '<h1><font color="yellow">' >> "$banner_file" ;;
-                5) echo '<h1><font color="purple">' >> "$banner_file" ;;
-                6) echo '<h1><font color="cyan">' >> "$banner_file" ;;
-                *) echo '<h1><font color="blue">' >> "$banner_file" ;;
+                1) main_color="green" ;;
+                2) main_color="red" ;;
+                3) main_color="blue" ;;
+                4) main_color="yellow" ;;
+                5) main_color="purple" ;;
+                6) main_color="cyan" ;;
+                *) main_color="cyan" ;;
             esac
-            echo "$ban_ner" >> "$banner_file"
-            echo '</font></h1>' >> "$banner_file"
-            echo '<h1><font>=============================</font></h1>' >> "$banner_file"
-            
+
+            # Diseño HTML Estilizado del Banner Principal
+            cat <<EOF > "$banner_file"
+<p align="center">
+<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
+<font color="yellow"><b>★ SERVIDOR VPS PRIVADO ★</b></font><br>
+<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
+<font color="${main_color}"><b>$ban_ner</b></font><br>
+<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
+EOF
+
             while true; do
-                echo -ne "${cor[yellow]}$(fun_trans 'Agregar mensaje secundario?') [S/N]: ${cor[reset]}"
-                read sin_nao
+                local sin_nao=""
+                echo -e "\n${cor[cyan]}─── [ MENSAJE ADICIONAL ] ──────────────────────────${cor[reset]}"
+                echo -ne "${cor[yellow]}$(fun_trans '¿Desea agregar un mensaje secundario?') [S/N]: ${cor[reset]}"
+                read -r sin_nao
+                sin_nao="${sin_nao:-vps-barba}"
+
                 if [[ "$sin_nao" =~ ^[sS]$ ]]; then
-                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje secundario'): ${cor[reset]}"
-                    read ban_ner2
-                    echo -e "${cor[green]}[1] $(fun_trans 'Verde')${cor[reset]}"
-                    echo -e "${cor[red]}[2] $(fun_trans 'Rojo')${cor[reset]}"
-                    echo -e "${cor[blue]}[3] $(fun_trans 'Azul')${cor[reset]}"
-                    echo -e "${cor[yellow]}[4] $(fun_trans 'Amarillo')${cor[reset]}"
-                    echo -e "${cor[purple]}[5] $(fun_trans 'Morado')${cor[reset]}"
-                    echo -e "${cor[cyan]}[6] $(fun_trans 'Cian')${cor[reset]}"
-                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Color'): ${cor[reset]}"
-                    read ban_ner2_cor
+                    local ban_ner2="" ban_ner2_cor="" sec_color=""
                     
-                    echo '<h6><font color="' >> "$banner_file"
+                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje secundario'): ${cor[reset]}"
+                    read -r ban_ner2
+                    ban_ner2="${ban_ner2:-vps-barba}"
+
+                    echo -e "\n${cor[yellow]}Color para el mensaje secundario:${cor[reset]}"
+                    echo -e "  ${cor[green]}[1] Verde${cor[reset]}    ${cor[red]}[2] Rojo${cor[reset]}      ${cor[blue]}[3] Azul${cor[reset]}"
+                    echo -e "  ${cor[yellow]}[4] Amarillo${cor[reset]} ${cor[purple]}[5] Morado${cor[reset]}    ${cor[cyan]}[6] Cian${cor[reset]}"
+                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de color'): ${cor[reset]}"
+                    read -r ban_ner2_cor
+                    ban_ner2_cor="${ban_ner2_cor:-vps-barba}"
+
                     case $ban_ner2_cor in
-                        1) echo 'green">' >> "$banner_file" ;;
-                        2) echo 'red">' >> "$banner_file" ;;
-                        3) echo 'blue">' >> "$banner_file" ;;
-                        4) echo 'yellow">' >> "$banner_file" ;;
-                        5) echo 'purple">' >> "$banner_file" ;;
-                        6) echo 'cyan">' >> "$banner_file" ;;
-                        *) echo 'red">' >> "$banner_file" ;;
+                        1) sec_color="green" ;;
+                        2) sec_color="red" ;;
+                        3) sec_color="blue" ;;
+                        4) sec_color="yellow" ;;
+                        5) sec_color="purple" ;;
+                        6) sec_color="cyan" ;;
+                        *) sec_color="yellow" ;;
                     esac
-                    echo "$ban_ner2" >> "$banner_file"
-                    echo "</h6></font>" >> "$banner_file"
+
+                    cat <<EOF >> "$banner_file"
+<br><font color="${sec_color}">► $ban_ner2</font><br>
+<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
+EOF
                 elif [[ "$sin_nao" =~ ^[nN]$ ]]; then
+                    break
+                else
                     break
                 fi
             done
-            
-            echo -e "${cor[green]}✔ $(fun_trans 'Banner creado con éxito')${cor[reset]}"
+
+            echo ' </p>' >> "$banner_file"
+
+            echo -e "\n${cor[green]}✔ $(fun_trans 'Banner estilizado y creado con éxito')${cor[reset]}"
             log_user_action "BANNER" "system" "created"
             ;;
         2)
             rm -f "$banner_file" 2>/dev/null
-            echo -e "${cor[red]}✘ $(fun_trans 'Banner eliminado')${cor[reset]}"
+            echo -e "\n${cor[red]}✖ $(fun_trans 'Banner eliminado del sistema')${cor[reset]}"
             log_user_action "BANNER" "system" "removed"
             ;;
         3)
             clear
             echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
-            echo -e "${cor[cyan]}║         $(fun_trans 'BANNER COMPLETO')                ║${cor[reset]}"
+            echo -e "${cor[cyan]}║           ${cor[white]}✦ $(fun_trans 'VISTA COMPLETA DEL BANNER') ✦${cor[cyan]}          ║${cor[reset]}"
             echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
             msg_bar
             if [[ -f "$banner_file" ]]; then
-                cat "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g'
+                sed 's/<[^>]*>//g' "$banner_file" 2>/dev/null
             else
-                echo -e "${cor[orange]}$(fun_trans 'No hay banner configurado')${cor[reset]}"
+                echo -e "${cor[orange]}   ✖ $(fun_trans 'No hay banner configurado')${cor[reset]}"
             fi
             msg_bar
             ;;
     esac
-    
-    # Reiniciar servicios SSH
+
+    # Reiniciar servicios SSH silenciosamente
     service ssh restart 2>/dev/null
     service sshd restart 2>/dev/null
     service dropbear restart 2>/dev/null
-    
+
     msg_bar
     echo -ne "${cor[pink]}$(fun_trans 'Presione Enter para continuar')${cor[reset]}"
-    read
+    read -r
 }
-
-# ==============================================
-# FUNCIÓN DE EJECUCIÓN
-# ==============================================
 
 if [[ "$1" == "verificar" ]]; then
     verif_fun
