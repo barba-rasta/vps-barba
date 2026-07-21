@@ -1959,7 +1959,7 @@ force_verification() {
     read
 }
 
-# Función baner_fun completamente rediseñada y optimizada
+# Función baner_fun mejorada con animaciones y estilos neón
 baner_fun() {
     clear
     echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
@@ -1976,10 +1976,10 @@ baner_fun() {
     echo -e "${cor[yellow]}  [ Vista Previa del Banner Actual ]${cor[reset]}"
     echo -e "${cor[cyan]}  ──────────────────────────────────────────────────${cor[reset]}"
     if [[ -f "$banner_file" ]]; then
-        head -10 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read -r line; do
+        head -15 "$banner_file" 2>/dev/null | sed 's/<[^>]*>//g' | while read -r line; do
             echo -e "   ${cor[white]}$line${cor[reset]}"
         done
-        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 10 ]] && echo -e "   ${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
+        [[ $(wc -l < "$banner_file" 2>/dev/null) -gt 15 ]] && echo -e "   ${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
     else
         echo -e "   ${cor[orange]}✖ $(fun_trans 'No hay ningún banner configurado actualmente')${cor[reset]}"
     fi
@@ -2003,41 +2003,58 @@ baner_fun() {
             local ban_ner="" ban_ner_cor="" main_color=""
             
             echo -e "\n${cor[cyan]}─── [ CONFIGURACIÓN PRINCIPAL ] ─────────────────────${cor[reset]}"
-            echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje principal'): ${cor[reset]}"
+            echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje secundario / Creador'): ${cor[reset]}"
             read -r ban_ner
             ban_ner="${ban_ner:-vps-barba}"
 
-            echo -e "\n${cor[yellow]}Color para el mensaje principal:${cor[reset]}"
-            echo -e "  ${cor[green]}[1] Verde${cor[reset]}    ${cor[red]}[2] Rojo${cor[reset]}      ${cor[blue]}[3] Azul${cor[reset]}"
-            echo -e "  ${cor[yellow]}[4] Amarillo${cor[reset]} ${cor[purple]}[5] Morado${cor[reset]}    ${cor[cyan]}[6] Cian${cor[reset]}"
+            echo -e "\n${cor[yellow]}Selecciona el color y estilo para el texto principal:${cor[reset]}"
+            echo -e "  ${cor[cyan]}[1] Cian Neón${cor[reset]}      ${cor[green]}[2] Lima Neón${cor[reset]}      ${cor[purple]}[3] Magenta / Rosa${cor[reset]}"
+            echo -e "  ${cor[yellow]}[4] Amarillo Oro${cor[reset]}   ${cor[orange]}[5] Naranja Fuego${cor[reset]}  ${cor[white]}[6] Blanco Brillante${cor[reset]}"
+            echo -e "  ${cor[red]}[7] Rojo Neón${cor[reset]}      ${cor[blue]}[8] Azul Eléctrico${cor[reset]}"
             echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de color'): ${cor[reset]}"
             read -r ban_ner_cor
             ban_ner_cor="${ban_ner_cor:-vps-barba}"
 
             case $ban_ner_cor in
-                1) main_color="green" ;;
-                2) main_color="red" ;;
-                3) main_color="blue" ;;
-                4) main_color="yellow" ;;
-                5) main_color="purple" ;;
-                6) main_color="cyan" ;;
-                *) main_color="cyan" ;;
+                1) main_color="#00f3ff" ;;
+                2) main_color="#00ff66" ;;
+                3) main_color="#ff00ff" ;;
+                4) main_color="#ffcc00" ;;
+                5) main_color="#ff6600" ;;
+                6) main_color="#ffffff" ;;
+                7) main_color="#ff0055" ;;
+                8) main_color="#0066ff" ;;
+                *) main_color="#00f3ff" ;;
             esac
 
-            # Diseño HTML Estilizado del Banner Principal
+            # Generar el HTML con la animación de cambio de color / palpito
             cat <<EOF > "$banner_file"
+<style>
+@keyframes pulse {
+  0% { color: #00f3ff; text-shadow: 0 0 5px #00f3ff; }
+  25% { color: #ff00ff; text-shadow: 0 0 10px #ff00ff; }
+  50% { color: #00ff66; text-shadow: 0 0 5px #00ff66; }
+  75% { color: #ffcc00; text-shadow: 0 0 10px #ffcc00; }
+  100% { color: #00f3ff; text-shadow: 0 0 5px #00f3ff; }
+}
+.pulsar {
+  animation: pulse 2s infinite alternate;
+  font-weight: bold;
+  font-size: 16px;
+}
+</style>
 <p align="center">
-<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
-<font color="yellow"><b>★ SERVIDOR VPS PRIVADO ★</b></font><br>
-<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
+<font color="#00f3ff">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
+<span class="pulsar">★ VPS-BARBA ★</span><br>
+<font color="#00f3ff">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font><br>
 <font color="${main_color}"><b>$ban_ner</b></font><br>
-<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
+<font color="#00f3ff">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
 EOF
 
             while true; do
                 local sin_nao=""
                 echo -e "\n${cor[cyan]}─── [ MENSAJE ADICIONAL ] ──────────────────────────${cor[reset]}"
-                echo -ne "${cor[yellow]}$(fun_trans '¿Desea agregar un mensaje secundario?') [S/N]: ${cor[reset]}"
+                echo -ne "${cor[yellow]}$(fun_trans '¿Desea agregar un texto secundario (ej. Teléfono)?') [S/N]: ${cor[reset]}"
                 read -r sin_nao
                 sin_nao="${sin_nao:-vps-barba}"
 
@@ -2049,25 +2066,28 @@ EOF
                     ban_ner2="${ban_ner2:-vps-barba}"
 
                     echo -e "\n${cor[yellow]}Color para el mensaje secundario:${cor[reset]}"
-                    echo -e "  ${cor[green]}[1] Verde${cor[reset]}    ${cor[red]}[2] Rojo${cor[reset]}      ${cor[blue]}[3] Azul${cor[reset]}"
-                    echo -e "  ${cor[yellow]}[4] Amarillo${cor[reset]} ${cor[purple]}[5] Morado${cor[reset]}    ${cor[cyan]}[6] Cian${cor[reset]}"
+                    echo -e "  ${cor[cyan]}[1] Cian Neón${cor[reset]}      ${cor[green]}[2] Lima Neón${cor[reset]}      ${cor[purple]}[3] Magenta / Rosa${cor[reset]}"
+                    echo -e "  ${cor[yellow]}[4] Amarillo Oro${cor[reset]}   ${cor[orange]}[5] Naranja Fuego${cor[reset]}  ${cor[white]}[6] Blanco Brillante${cor[reset]}"
+                    echo -e "  ${cor[red]}[7] Rojo Neón${cor[reset]}      ${cor[blue]}[8] Azul Eléctrico${cor[reset]}"
                     echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción de color'): ${cor[reset]}"
                     read -r ban_ner2_cor
                     ban_ner2_cor="${ban_ner2_cor:-vps-barba}"
 
                     case $ban_ner2_cor in
-                        1) sec_color="green" ;;
-                        2) sec_color="red" ;;
-                        3) sec_color="blue" ;;
-                        4) sec_color="yellow" ;;
-                        5) sec_color="purple" ;;
-                        6) sec_color="cyan" ;;
-                        *) sec_color="yellow" ;;
+                        1) sec_color="#00f3ff" ;;
+                        2) sec_color="#00ff66" ;;
+                        3) sec_color="#ff00ff" ;;
+                        4) sec_color="#ffcc00" ;;
+                        5) sec_color="#ff6600" ;;
+                        6) sec_color="#ffffff" ;;
+                        7) sec_color="#ff0055" ;;
+                        8) sec_color="#0066ff" ;;
+                        *) sec_color="#ffcc00" ;;
                     esac
 
                     cat <<EOF >> "$banner_file"
 <br><font color="${sec_color}">► $ban_ner2</font><br>
-<font color="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
+<font color="#00f3ff">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</font>
 EOF
                 elif [[ "$sin_nao" =~ ^[nN]$ ]]; then
                     break
@@ -2078,7 +2098,7 @@ EOF
 
             echo ' </p>' >> "$banner_file"
 
-            echo -e "\n${cor[green]}✔ $(fun_trans 'Banner estilizado y creado con éxito')${cor[reset]}"
+            echo -e "\n${cor[green]}✔ $(fun_trans 'Banner animado "vps-barba" creado con éxito')${cor[reset]}"
             log_user_action "BANNER" "system" "created"
             ;;
         2)
@@ -2110,6 +2130,7 @@ EOF
     echo -ne "${cor[pink]}$(fun_trans 'Presione Enter para continuar')${cor[reset]}"
     read -r
 }
+
 
 if [[ "$1" == "verificar" ]]; then
     verif_fun
