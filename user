@@ -1,0 +1,1336 @@
+#!/bin/bash
+# ==============================================
+# GESTIÓN DE USUARIOS - VPS-BARBA (MEJORADO v3.0)
+# ==============================================
+# Versión: 3.0
+# ==============================================
+
+# -------------------- CONFIGURACIÓN --------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TRANSLATOR_PY="$SCRIPT_DIR/translator.py"
+LOG_FILE="/var/log/user_manager.log"
+CONFIG_DIR="/etc/vps-barba"
+BACKUP_DIR="/root/backups_users"
+SCPdir="/"
+MyPID=".pid-adm"
+MyTIME="time-adm"
+USRdatabase="ADMuser"
+
+# Crear directorios
+mkdir -p "$CONFIG_DIR" "$BACKUP_DIR" 2>/dev/null
+
+# Archivos de estado
+[[ -e .${MyPID} ]] && source .${MyPID} || touch .${MyPID}
+[[ -e ${MyTIME} ]] && source .${MyTIME} || touch .${MyTIME}
+[[ ! -e .${USRdatabase} ]] && touch .${USRdatabase}
+sort .${USRdatabase} | uniq > .${USRdatabase}tmp 2>/dev/null
+mv -f .${USRdatabase}tmp .${USRdatabase} 2>/dev/null
+
+# -------------------- COLORES ANSI --------------------
+declare -A cor=(
+    [reset]="\e[0m"
+    [red]="\033[38;5;196m"
+    [green]="\033[38;5;82m"
+    [yellow]="\033[38;5;226m"
+    [blue]="\033[38;5;39m"
+    [purple]="\033[38;5;99m"
+    [cyan]="\033[1;36m"
+    [white]="\033[1;37m"
+    [orange]="\033[38;5;208m"
+    [pink]="\033[38;5;213m"
+)
+barra="\033[38;5;99m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+barra_doble="\033[38;5;99m════════════════════════════════════════════════════════\033[0m"
+titulo_barra="\033[38;5;99m▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣▣\033[0m"
+
+# -------------------- FUNCIONES AUXILIARES --------------------
+log_message() {
+    local level="$1"; local msg="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $msg" >> "$LOG_FILE"
+}
+
+fun_trans() {
+    local texto="$1"
+    if [[ -f "$TRANSLATOR_PY" ]]; then
+        python3 "$TRANSLATOR_PY" traducir "$texto" 2>/dev/null || echo "$texto"
+    else
+        echo "$texto"
+    fi
+}
+
+msg_bar() { echo -e "$barra"; }
+msg_title() { echo -e "$titulo_barra"; }
+
+# -------------------- VALIDACIONES --------------------
+validate_username() {
+    local u="$1"
+    [[ -z "$u" ]] && { echo "USERNAME_EMPTY"; return 1; }
+    [[ ${#u} -lt 4 ]] && { echo "USERNAME_TOO_SHORT"; return 1; }
+    [[ ${#u} -gt 24 ]] && { echo "USERNAME_TOO_LONG"; return 1; }
+    [[ "$u" =~ [^a-zA-Z0-9_.-] ]] && { echo "USERNAME_INVALID_CHARS"; return 1; }
+    grep -q "^$u:" /etc/passwd 2>/dev/null && { echo "USERNAME_EXISTS"; return 1; }
+    echo "VALID"; return 0
+}
+
+validate_password() {
+    local p="$1"
+    [[ -z "$p" ]] && { echo "PASSWORD_EMPTY"; return 1; }
+    [[ ${#p} -lt 6 ]] && { echo "PASSWORD_TOO_SHORT"; return 1; }
+    [[ ${#p} -gt 30 ]] && { echo "PASSWORD_TOO_LONG"; return 1; }
+    [[ ! "$p" =~ [A-Z] || ! "$p" =~ [a-z] || ! "$p" =~ [0-9] ]] && { echo "PASSWORD_WEAK"; return 1; }
+    echo "VALID"; return 0
+}
+
+validate_days() {
+    local d="$1"
+    [[ -z "$d" ]] && { echo "DAYS_EMPTY"; return 1; }
+    [[ ! "$d" =~ ^[0-9]+$ ]] && { echo "DAYS_INVALID"; return 1; }
+    [[ "$d" -lt 1 ]] && { echo "DAYS_TOO_LOW"; return 1; }
+    [[ "$d" -gt 365 ]] && { echo "DAYS_TOO_HIGH"; return 1; }
+    echo "VALID"; return 0
+}
+
+validate_limit() {
+    local l="$1"
+    [[ -z "$l" ]] && { echo "LIMIT_EMPTY"; return 1; }
+    [[ ! "$l" =~ ^[0-9]+$ ]] && { echo "LIMIT_INVALID"; return 1; }
+    [[ "$l" -lt 1 ]] && { echo "LIMIT_TOO_LOW"; return 1; }
+    [[ "$l" -gt 999 ]] && { echo "LIMIT_TOO_HIGH"; return 1; }
+    echo "VALID"; return 0
+}
+
+show_error() {
+    local code="$1"
+    local msg
+    case "$code" in
+        "USERNAME_EMPTY") msg="$(fun_trans 'El nombre de usuario no puede estar vacío')" ;;
+        "USERNAME_TOO_SHORT") msg="$(fun_trans 'El nombre de usuario debe tener al menos 4 caracteres')" ;;
+        "USERNAME_TOO_LONG") msg="$(fun_trans 'El nombre de usuario no puede exceder 24 caracteres')" ;;
+        "USERNAME_INVALID_CHARS") msg="$(fun_trans 'El nombre de usuario contiene caracteres inválidos')" ;;
+        "USERNAME_EXISTS") msg="$(fun_trans 'El usuario ya existe en el sistema')" ;;
+        "PASSWORD_EMPTY") msg="$(fun_trans 'La contraseña no puede estar vacía')" ;;
+        "PASSWORD_TOO_SHORT") msg="$(fun_trans 'La contraseña debe tener al menos 6 caracteres')" ;;
+        "PASSWORD_TOO_LONG") msg="$(fun_trans 'La contraseña no puede exceder 30 caracteres')" ;;
+        "PASSWORD_WEAK") msg="$(fun_trans 'La contraseña debe contener mayúsculas, minúsculas y números')" ;;
+        "DAYS_EMPTY") msg="$(fun_trans 'La duración no puede estar vacía')" ;;
+        "DAYS_INVALID") msg="$(fun_trans 'La duración debe ser un número válido')" ;;
+        "DAYS_TOO_LOW") msg="$(fun_trans 'La duración mínima es 1 día')" ;;
+        "DAYS_TOO_HIGH") msg="$(fun_trans 'La duración máxima es de 365 días')" ;;
+        "LIMIT_EMPTY") msg="$(fun_trans 'El límite no puede estar vacío')" ;;
+        "LIMIT_INVALID") msg="$(fun_trans 'El límite debe ser un número válido')" ;;
+        "LIMIT_TOO_LOW") msg="$(fun_trans 'El límite mínimo es 1')" ;;
+        "LIMIT_TOO_HIGH") msg="$(fun_trans 'El límite máximo es 999')" ;;
+        "USER_NOT_FOUND") msg="$(fun_trans 'Usuario no encontrado en el sistema')" ;;
+        *) msg="$(fun_trans 'Error desconocido')" ;;
+    esac
+    echo -e "${cor[red]}✘ $msg${cor[reset]}"
+    sleep 2
+}
+
+# -------------------- UTILIDADES --------------------
+meu_ip() {
+    local ip_file="/etc/MEUIPADM"
+    if [[ -e "$ip_file" ]]; then
+        cat "$ip_file"
+    else
+        local ip1=$(ip addr | grep 'inet' | grep -v inet6 | grep -vE '127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | grep -o -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -1)
+        local ip2=$(wget -qO- ipv4.icanhazip.com 2>/dev/null)
+        local ip=${ip2:-$ip1}
+        echo "$ip" > "$ip_file" 2>/dev/null
+        echo "$ip"
+    fi
+}
+
+mostrar_usuarios() {
+    awk -F: '$3 > 900 && $1 !~ /^(nobody|polkitd|system-|_)/ {print $1}' /etc/passwd 2>/dev/null | sort
+}
+
+get_user_info() {
+    local user="$1"
+    grep "^${user}|" "${USRdatabase}" 2>/dev/null | head -1
+}
+
+get_user_expiry() {
+    local user="$1"
+    chage -l "$user" 2>/dev/null | grep -i "Account expires" | awk -F: '{print $2}' | sed 's/^ //'
+}
+
+get_user_status() {
+    local user="$1"
+    local exp=$(get_user_expiry "$user")
+    [[ -z "$exp" || "$exp" == "never" ]] && { echo "unlimited"; return; }
+    local exp_sec=$(date +%s --date="$exp" 2>/dev/null)
+    local now_sec=$(date +%s)
+    [[ "$exp_sec" -lt "$now_sec" ]] && echo "expired" || echo "active"
+}
+
+get_days_remaining() {
+    local user="$1"
+    local exp=$(get_user_expiry "$user")
+    [[ -z "$exp" || "$exp" == "never" ]] && { echo "∞"; return; }
+    local exp_sec=$(date +%s --date="$exp" 2>/dev/null)
+    local now_sec=$(date +%s)
+    [[ "$exp_sec" -lt "$now_sec" ]] && echo "0" || echo $(( (exp_sec - now_sec) / 86400 ))
+}
+
+generate_secure_password() {
+    local len=${1:-16}
+    tr -dc 'A-Za-z0-9!@#$%^&*()_+=' </dev/urandom 2>/dev/null | head -c "$len" || openssl rand -base64 12 | tr -d '/+=' | head -c "$len"
+}
+
+get_user_connections() {
+    local user="$1"
+    local total=0
+    # SSH
+    total=$(( total + $(ps aux 2>/dev/null | grep -v grep | grep sshd | grep -w "$user" | grep -v root | wc -l) ))
+    # Dropbear
+    if command -v dropbear &>/dev/null; then
+        total=$(( total + $(dropbear_pids 2>/dev/null | grep -w "$user" | wc -l) ))
+    fi
+    # OpenVPN
+    if [[ -f /etc/openvpn/openvpn-status.log ]]; then
+        total=$(( total + $(grep -c "^${user}," /etc/openvpn/openvpn-status.log 2>/dev/null) ))
+    fi
+    echo "$total"
+}
+
+dropbear_pids() {
+    local log="/var/log/auth.log"
+    local loginsukses='Password auth succeeded'
+    [[ ! -f "$log" ]] && return
+    for port in $(ps aux 2>/dev/null | grep dropbear | grep -v grep | awk '{print $17}' | sort -u); do
+        for pid in $(ps ax 2>/dev/null | grep dropbear | grep "$port" | awk '{print $1}'); do
+            local login=$(grep "$pid" "$log" 2>/dev/null | grep "$loginsukses" | tail -1)
+            if [[ -n "$login" ]]; then
+                local user=$(echo "$login" | awk -F" " '{print $10}' | sed -r "s/'//g")
+                [[ -n "$user" ]] && echo "$user"
+            fi
+        done
+    done
+}
+
+# -------------------- GESTIÓN DE USUARIOS --------------------
+add_user() {
+    local username="$1" password="$2" days="$3" limit="$4"
+    local valid
+    valid=$(validate_username "$username") && [[ "$valid" != "VALID" ]] && return 1
+    valid=$(validate_password "$password") && [[ "$valid" != "VALID" ]] && return 1
+    valid=$(validate_days "$days") && [[ "$valid" != "VALID" ]] && return 1
+    valid=$(validate_limit "$limit") && [[ "$valid" != "VALID" ]] && return 1
+
+    local date_exp=$(date "+%F" -d "+ $days days")
+    local valid_date=$(date '+%C%y-%m-%d' -d "+ $days days")
+    useradd -M -s /bin/false "$username" -e "$valid_date" >/dev/null 2>&1 || return 1
+    echo "$username:$password" | chpasswd 2>/dev/null || { userdel --force "$username" 2>/dev/null; return 1; }
+
+    local temp_file=$(mktemp)
+    grep -v "^${username}|" "${USRdatabase}" > "$temp_file" 2>/dev/null
+    echo "${username}|${password}|${date_exp}|${limit}" >> "$temp_file"
+    mv "$temp_file" "${USRdatabase}"
+    log_message "INFO" "CREATE: $username days=$days limit=$limit expires=$date_exp"
+    return 0
+}
+
+renew_user() {
+    local username="$1" days="$2"
+    id "$username" &>/dev/null || return 1
+    local valid=$(validate_days "$days") && [[ "$valid" != "VALID" ]] && return 1
+    local date_exp=$(date "+%F" -d "+ $days days")
+    local valid_date=$(date '+%C%y-%m-%d' -d "+ $days days")
+    chage -E "$valid_date" "$username" 2>/dev/null || return 1
+    if grep -q "^${username}|" "${USRdatabase}" 2>/dev/null; then
+        local temp_file=$(mktemp)
+        local line=$(grep "^${username}|" "${USRdatabase}")
+        local pass=$(echo "$line" | cut -d'|' -f2)
+        local lim=$(echo "$line" | cut -d'|' -f4)
+        grep -v "^${username}|" "${USRdatabase}" > "$temp_file"
+        echo "${username}|${pass}|${date_exp}|${lim}" >> "$temp_file"
+        mv "$temp_file" "${USRdatabase}"
+    fi
+    log_message "INFO" "RENEW: $username days=$days expires=$date_exp"
+    return 0
+}
+
+remove_user() {
+    local username="$1"
+    id "$username" &>/dev/null || return 1
+    pkill -u "$username" 2>/dev/null
+    userdel --force "$username" 2>/dev/null || return 1
+    if [[ -e "${USRdatabase}" ]]; then
+        local temp_file=$(mktemp)
+        grep -v "^${username}|" "${USRdatabase}" > "$temp_file"
+        mv "$temp_file" "${USRdatabase}"
+    fi
+    rm -f "/home/$username" "/root/${username}.zip" "/root/${username}.ovpn" 2>/dev/null
+    log_message "INFO" "REMOVE: $username"
+    return 0
+}
+
+edit_user() {
+    local username="$1" password="$2" days="$3" limit="$4"
+    id "$username" &>/dev/null || return 1
+    local valid=$(validate_password "$password") && [[ "$valid" != "VALID" ]] && return 1
+    valid=$(validate_days "$days") && [[ "$valid" != "VALID" ]] && return 1
+    valid=$(validate_limit "$limit") && [[ "$valid" != "VALID" ]] && return 1
+
+    local date_exp=$(date "+%F" -d "+ $days days")
+    local valid_date=$(date '+%C%y-%m-%d' -d "+ $days days")
+    echo "$username:$password" | chpasswd 2>/dev/null || return 1
+    chage -E "$valid_date" "$username" 2>/dev/null || return 1
+    if [[ -e "${USRdatabase}" ]]; then
+        local temp_file=$(mktemp)
+        grep -v "^${username}|" "${USRdatabase}" > "$temp_file"
+        echo "${username}|${password}|${date_exp}|${limit}" >> "$temp_file"
+        mv "$temp_file" "${USRdatabase}"
+    fi
+    log_message "INFO" "EDIT: $username days=$days limit=$limit expires=$date_exp"
+    return 0
+}
+
+# -------------------- MONITOREO EN BACKGROUND --------------------
+verif_fun() {
+    declare -A TIMEUS
+    while true; do
+        sleep 5
+        if [[ -e ${MyTIME} ]]; then source ${MyTIME}; fi
+        local TimeNOW=$(date +%s)
+        local expired_count=0
+
+        while read user; do
+            local DataUser=$(get_user_expiry "$user")
+            [[ -z "$DataUser" || "$DataUser" == "never" ]] && continue
+            local DataSEC=$(date +%s --date="$DataUser" 2>/dev/null)
+            if [[ "$DataSEC" -lt "$TimeNOW" ]]; then
+                usermod -L "$user" 2>/dev/null
+                ((expired_count++))
+            fi
+        done <<< "$(mostrar_usuarios)"
+
+        while read user; do
+            id "$user" &>/dev/null || continue
+            local TotalPID=$(get_user_connections "$user")
+            if [[ "$TotalPID" -eq 0 ]]; then
+                usermod -U "$user" 2>/dev/null
+                continue
+            fi
+            # Actualizar tiempo
+            [[ -z "${TIMEUS[$user]}" ]] && TIMEUS[$user]=0
+            [[ ! "${TIMEUS[$user]}" =~ ^[0-9]+$ ]] && TIMEUS[$user]=0
+            TIMEUS[$user]=$((5 + ${TIMEUS[$user]}))
+            # Guardar tiempo
+            local temp_time=$(mktemp)
+            grep -v "^TIMEUS\[$user\]=" "$MyTIME" 2>/dev/null > "$temp_time"
+            echo "TIMEUS[$user]='${TIMEUS[$user]}'" >> "$temp_time"
+            mv "$temp_time" "$MyTIME"
+
+            local line=$(get_user_info "$user")
+            local limit=$(echo "$line" | cut -d'|' -f4)
+            [[ -z "$limit" || ! "$limit" =~ ^[0-9]+$ ]] && continue
+            if [[ "$TotalPID" -le "$limit" ]]; then
+                usermod -U "$user" 2>/dev/null
+            else
+                local kill_count=$((TotalPID - limit))
+                local pids=$(ps aux 2>/dev/null | grep -v grep | grep -E "(sshd|dropbear|openvpn)" | grep -w "$user" | awk '{print $2}' | tail -n "$kill_count")
+                for pid in $pids; do kill -9 "$pid" 2>/dev/null; done
+                usermod -L "$user" 2>/dev/null
+            fi
+        done <<< "$(mostrar_usuarios)"
+
+        echo "$expired_count" > "${SCPdir}/USRexpired" 2>/dev/null
+        echo "$(ps aux 2>/dev/null | grep -E "(sshd|dropbear|openvpn)" | grep -v grep | awk '{print $1}' | sort -u | wc -l)" > "${SCPdir}/USRonlines" 2>/dev/null
+
+        if [[ $expired_count -gt 0 ]]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - Expired: $expired_count" >> "/var/log/expired_users.log"
+        fi
+        # Rotar logs
+        if [[ $(wc -l < "$LOG_FILE" 2>/dev/null) -gt 10000 ]]; then
+            tail -n 5000 "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+        fi
+    done
+}
+
+# -------------------- FUNCIONES DEL MENÚ (mejoradas) --------------------
+new_user() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'CREAR NUEVO USUARIO')                ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    if [[ ${#usuarios_ativos[@]} -gt 0 ]]; then
+        echo -e "${cor[yellow]}$(fun_trans 'Usuarios existentes')${cor[reset]}"
+        msg_bar
+        for us in "${usuarios_ativos[@]}"; do echo -e "${cor[green]}•${cor[reset]} ${cor[white]}$us${cor[reset]}"; done
+        msg_bar
+    fi
+    local username password days limit
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nombre del nuevo usuario'): ${cor[reset]}"
+        read username
+        local valid=$(validate_username "$username")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Contraseña'): ${cor[reset]}"
+        read -s password; echo
+        local valid=$(validate_password "$password")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Días de duración'): ${cor[reset]}"
+        read days
+        local valid=$(validate_days "$days")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Límite de conexión'): ${cor[reset]}"
+        read limit
+        local valid=$(validate_limit "$limit")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    msg_bar
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'RESUMEN DEL USUARIO')           ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'IP'): ${cor[green]}$(meu_ip)${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Usuario'): ${cor[green]}$username${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Contraseña'): ${cor[green]}$password${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Días'): ${cor[green]}$days${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Expira'): ${cor[green]}$(date "+%F" -d "+ $days days")${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Límite'): ${cor[green]}$limit${cor[reset]}"
+    msg_bar
+    echo -ne "${cor[yellow]}$(fun_trans '¿Crear usuario?') [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        if add_user "$username" "$password" "$days" "$limit"; then
+            echo -e "${cor[green]}✔ $(fun_trans 'Usuario creado con éxito')${cor[reset]}"
+            [[ -f /etc/openvpn/openvpn-status.log ]] && newclient "$username" "$password" 2>/dev/null
+        else
+            echo -e "${cor[red]}✘ $(fun_trans 'Error al crear el usuario')${cor[reset]}"
+        fi
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Creación cancelada')${cor[reset]}"
+    fi
+    msg_bar; echo -ne "${cor[pink]}$(fun_trans 'Presione Enter')${cor[reset]}"; read
+}
+
+remove_user_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'ELIMINAR USUARIO')                ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; echo -ne "${cor[pink]}$(fun_trans 'Presione Enter')${cor[reset]}"; read; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do
+        local status=$(get_user_status "$us")
+        local icon=""
+        case "$status" in active) icon="${cor[green]}●${cor[reset]}" ;; expired) icon="${cor[red]}●${cor[reset]}" ;; unlimited) icon="${cor[purple]}●${cor[reset]}" ;; esac
+        echo -e "${cor[green]}[$i]${cor[reset]} $us $icon"
+        ((i++))
+    done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -ne "${cor[red]}$(fun_trans '¿Eliminar a') $username? [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        remove_user "$username" && echo -e "${cor[red]}✘ $(fun_trans 'Eliminado') $username${cor[reset]}" || echo -e "${cor[red]}✘ $(fun_trans 'Error')${cor[reset]}"
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Cancelado')${cor[reset]}"
+    fi
+    msg_bar; echo -ne "${cor[pink]}$(fun_trans 'Presione Enter')${cor[reset]}"; read
+}
+
+renew_user_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'RENOVAR USUARIO')                ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do
+        local days_left=$(get_days_remaining "$us")
+        echo -e "${cor[green]}[$i]${cor[reset]} $us ${cor[yellow]}(días: $days_left)${cor[reset]}"
+        ((i++))
+    done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    local days
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nuevos días para') $username: ${cor[reset]}"
+        read days
+        local valid=$(validate_days "$days")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    echo -ne "${cor[yellow]}$(fun_trans '¿Renovar?') [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        renew_user "$username" "$days" && echo -e "${cor[green]}✔ $(fun_trans 'Renovado') - nueva expiración: $(date "+%F" -d "+ $days days")${cor[reset]}" || echo -e "${cor[red]}✘ $(fun_trans 'Error')${cor[reset]}"
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Cancelado')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+edit_user_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'EDITAR USUARIO')                 ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do
+        local status=$(get_user_status "$us")
+        local icon=""
+        case "$status" in active) icon="${cor[green]}●${cor[reset]}" ;; expired) icon="${cor[red]}●${cor[reset]}" ;; unlimited) icon="${cor[purple]}●${cor[reset]}" ;; esac
+        echo -e "${cor[green]}[$i]${cor[reset]} $us $icon"
+        ((i++))
+    done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    local password days limit
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nueva contraseña'): ${cor[reset]}"
+        read -s password; echo
+        local valid=$(validate_password "$password")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nuevos días'): ${cor[reset]}"
+        read days
+        local valid=$(validate_days "$days")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nuevo límite'): ${cor[reset]}"
+        read limit
+        local valid=$(validate_limit "$limit")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    msg_bar
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'RESUMEN DE EDICIÓN')           ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Usuario'): ${cor[green]}$username${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Contraseña'): ${cor[green]}$password${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Días'): ${cor[green]}$days${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Expira'): ${cor[green]}$(date "+%F" -d "+ $days days")${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Límite'): ${cor[green]}$limit${cor[reset]}"
+    msg_bar
+    echo -ne "${cor[yellow]}$(fun_trans '¿Editar?') [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        edit_user "$username" "$password" "$days" "$limit" && echo -e "${cor[green]}✔ $(fun_trans 'Editado')${cor[reset]}" || echo -e "${cor[red]}✘ $(fun_trans 'Error')${cor[reset]}"
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Cancelado')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+change_user_password_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'CAMBIAR CONTRASEÑA')               ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do echo -e "${cor[green]}[$i]${cor[reset]} $us"; ((i++)); done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    local password
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nueva contraseña para') $username: ${cor[reset]}"
+        read -s password; echo
+        local valid=$(validate_password "$password")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    echo "$username:$password" | chpasswd 2>/dev/null
+    if [[ $? -eq 0 ]]; then
+        if grep -q "^${username}|" "${USRdatabase}" 2>/dev/null; then
+            local temp_file=$(mktemp)
+            local line=$(grep "^${username}|" "${USRdatabase}")
+            local date_exp=$(echo "$line" | cut -d'|' -f3)
+            local limit=$(echo "$line" | cut -d'|' -f4)
+            grep -v "^${username}|" "${USRdatabase}" > "$temp_file"
+            echo "${username}|${password}|${date_exp}|${limit}" >> "$temp_file"
+            mv "$temp_file" "${USRdatabase}"
+        fi
+        echo -e "${cor[green]}✔ $(fun_trans 'Contraseña actualizada')${cor[reset]}"
+        log_message "INFO" "PASSWORD_CHANGE: $username"
+    else
+        echo -e "${cor[red]}✘ $(fun_trans 'Error al cambiar')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+detail_user() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'DETALLES DE TODOS LOS USUARIOS')         ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    printf "${cor[yellow]}%-20s ${cor[green]}%-15s ${cor[purple]}%-15s ${cor[cyan]}%-8s ${cor[orange]}%-10s${cor[reset]}\n" \
+        "$(fun_trans 'USUARIO')" "$(fun_trans 'CONTRASEÑA')" "$(fun_trans 'EXPIRA')" "$(fun_trans 'DÍAS')" "$(fun_trans 'LÍMITE')"
+    msg_bar
+    local VPSsec=$(date +%s)
+    while read user; do
+        local info=$(get_user_info "$user")
+        if [[ -n "$info" ]]; then
+            local pass=$(echo "$info" | cut -d'|' -f2)
+            local DateExp=$(echo "$info" | cut -d'|' -f3)
+            local limit=$(echo "$info" | cut -d'|' -f4)
+            local DataSec=$(date +%s --date="$DateExp" 2>/dev/null)
+            if [[ "$VPSsec" -gt "$DataSec" ]]; then
+                local days_left="${cor[red]}Expirado${cor[reset]}"
+            else
+                local days_left="${cor[green]}$(( (DataSec - VPSsec) / 86400 )) días${cor[reset]}"
+            fi
+            printf "${cor[white]}%-20s ${cor[green]}%-15s ${cor[purple]}%-15s ${cor[cyan]}%-8s ${cor[orange]}%-10s${cor[reset]}\n" \
+                "$user" "$pass" "$DateExp" "$days_left" "$limit"
+        else
+            local status=$(get_user_status "$user")
+            local icon=""
+            case "$status" in active) icon="${cor[green]}Activo${cor[reset]}" ;; expired) icon="${cor[red]}Expirado${cor[reset]}" ;; unlimited) icon="${cor[purple]}Ilimitado${cor[reset]}" ;; esac
+            printf "${cor[white]}%-20s ${cor[red]}%-15s ${cor[red]}%-15s ${cor[cyan]}%-8s ${cor[orange]}%-10s${cor[reset]}\n" "$user" "???" "???" "$icon" "???"
+        fi
+    done <<< "$(mostrar_usuarios)"
+    msg_bar; read -p "Enter"
+}
+
+monit_user() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'MONITOR DE USUARIOS CONECTADOS')          ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    printf "${cor[yellow]}%-25s ${cor[green]}%-15s ${cor[cyan]}%-15s${cor[reset]}\n" \
+        "$(fun_trans 'USUARIO')" "$(fun_trans 'CONEXIONES')" "$(fun_trans 'TIEMPO')"
+    msg_bar
+    while read user; do
+        local TotalPID=$(get_user_connections "$user")
+        local line=$(get_user_info "$user")
+        local limit=$(echo "$line" | cut -d'|' -f4)
+        [[ -z "$limit" ]] && limit="?"
+        local TIMEON="${TIMEUS[$user]}"
+        [[ -z "$TIMEON" ]] && TIMEON=0
+        local MIN=$((TIMEON / 60))
+        local SEC=$((TIMEON - MIN * 60))
+        local HOR=$((MIN / 60))
+        MIN=$((MIN - HOR * 60))
+        local HOUR="${HOR}h:${MIN}m:${SEC}s"
+        local status=""
+        if [[ $TotalPID -gt 0 ]]; then status="${cor[green]}● Conectado${cor[reset]}"; else status="${cor[red]}● Desconectado${cor[reset]}"; fi
+        printf "${cor[white]}%-20s ${cor[green]}%3s/${limit} ${cor[cyan]}%-15s ${cor[orange]}%s${cor[reset]}\n" \
+            "$user" "$TotalPID" "$HOUR" "$status"
+    done <<< "$(mostrar_usuarios)"
+    msg_bar; read -p "Enter"
+}
+
+clean_expired_users() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║        $(fun_trans 'LIMPIAR USUARIOS EXPIRADOS')          ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local expired=()
+    while read user; do
+        [[ "$(get_user_status "$user")" == "expired" ]] && expired+=("$user")
+    done <<< "$(mostrar_usuarios)"
+    if [[ ${#expired[@]} -eq 0 ]]; then
+        echo -e "${cor[green]}✔ $(fun_trans 'No hay usuarios expirados')${cor[reset]}"
+        msg_bar; read -p "Enter"; return 0
+    fi
+    echo -e "${cor[red]}$(fun_trans 'Usuarios expirados')${cor[reset]}"
+    msg_bar
+    for user in "${expired[@]}"; do
+        local days_expired=$((0 - $(get_days_remaining "$user")))
+        echo -e "${cor[red]}✘ $user ${cor[yellow]}(expirado $days_expired días)${cor[reset]}"
+    done
+    msg_bar
+    echo -ne "${cor[red]}$(fun_trans '¿Eliminar todos?') [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        local removed=0
+        for user in "${expired[@]}"; do
+            if remove_user "$user"; then
+                echo -e "${cor[red]}✘ $(fun_trans 'Eliminado') $user${cor[reset]}"
+                ((removed++))
+            fi
+        done
+        echo -e "${cor[green]}✔ $(fun_trans 'Eliminados') $removed $(fun_trans 'usuarios')${cor[reset]}"
+        log_message "INFO" "CLEAN_EXPIRED: removed=$removed"
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Cancelado')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+kill_user_connections_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'KILL DE CONEXIONES')                ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local users_connected=()
+    while read user; do
+        local conn=$(get_user_connections "$user")
+        [[ $conn -gt 0 ]] && users_connected+=("$user")
+    done <<< "$(mostrar_usuarios)"
+    if [[ ${#users_connected[@]} -eq 0 ]]; then
+        echo -e "${cor[yellow]}$(fun_trans 'No hay usuarios con conexiones')${cor[reset]}"
+        msg_bar; read -p "Enter"; return 0
+    fi
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios con conexiones')${cor[reset]}"
+    msg_bar
+    local i=0
+    for user in "${users_connected[@]}"; do
+        local conn=$(get_user_connections "$user")
+        echo -e "${cor[green]}[$i]${cor[reset]} $user ${cor[red]}(conn: $conn)${cor[reset]}"
+        ((i++))
+    done
+    msg_bar
+    echo -e "${cor[yellow]}[a] $(fun_trans 'Todos')${cor[reset]}"
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione'): ${cor[reset]}"
+        read selection
+    done
+    if [[ "$selection" =~ ^[aA]$ ]]; then
+        for user in "${users_connected[@]}"; do pkill -u "$user" 2>/dev/null; echo -e "${cor[red]}✘ $(fun_trans 'Terminadas para') $user${cor[reset]}"; done
+        log_message "INFO" "KILL_ALL: all"
+    elif [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#users_connected[@]} ]]; then
+        local user="${users_connected[$selection]}"
+        pkill -u "$user" 2>/dev/null
+        echo -e "${cor[red]}✘ $(fun_trans 'Terminadas para') $user${cor[reset]}"
+        log_message "INFO" "KILL: $user"
+    else
+        local user="$selection"
+        if id "$user" &>/dev/null; then
+            pkill -u "$user" 2>/dev/null
+            echo -e "${cor[red]}✘ $(fun_trans 'Terminadas para') $user${cor[reset]}"
+            log_message "INFO" "KILL: $user"
+        else
+            echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"
+        fi
+    fi
+    msg_bar; read -p "Enter"
+}
+
+ban_user_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║              $(fun_trans 'BANEAR USUARIO')               ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do echo -e "${cor[green]}[$i]${cor[reset]} $us"; ((i++)); done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -ne "${cor[red]}$(fun_trans '¿Banear a') $username? [S/N]: ${cor[reset]}"
+    read confirm
+    if [[ "$confirm" =~ ^[sS]$ ]]; then
+        usermod -L "$username" 2>/dev/null
+        pkill -u "$username" 2>/dev/null
+        echo -e "${cor[red]}✘ $(fun_trans 'Baneado') $username${cor[reset]}"
+        log_message "INFO" "BAN: $username"
+    else
+        echo -e "${cor[yellow]}⏭ $(fun_trans 'Cancelado')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+unban_user_interactive() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║            $(fun_trans 'DESBANEAR USUARIO')             ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local usuarios_ativos=($(mostrar_usuarios))
+    [[ ${#usuarios_ativos[@]} -eq 0 ]] && { echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    echo -e "${cor[yellow]}$(fun_trans 'Usuarios disponibles')${cor[reset]}"
+    msg_bar
+    local i=0
+    for us in "${usuarios_ativos[@]}"; do echo -e "${cor[green]}[$i]${cor[reset]} $us"; ((i++)); done
+    msg_bar
+    local selection
+    while [[ -z "$selection" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Seleccione (nombre o número)'): ${cor[reset]}"
+        read selection
+    done
+    local username=""
+    if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -lt ${#usuarios_ativos[@]} ]]; then
+        username="${usuarios_ativos[$selection]}"
+    else
+        username="$selection"
+    fi
+    id "$username" &>/dev/null || { echo -e "${cor[red]}✘ $(fun_trans 'Usuario no encontrado')${cor[reset]}"; msg_bar; read -p "Enter"; return 1; }
+    usermod -U "$username" 2>/dev/null
+    echo -e "${cor[green]}✔ $(fun_trans 'Desbaneado') $username${cor[reset]}"
+    log_message "INFO" "UNBAN: $username"
+    msg_bar; read -p "Enter"
+}
+
+export_users() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'EXPORTAR USUARIOS')                 ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local export_file="$BACKUP_DIR/export_$(date +%Y%m%d_%H%M%S).txt"
+    if [[ ! -e "${USRdatabase}" || ! -s "${USRdatabase}" ]]; then
+        echo -e "${cor[red]}✘ $(fun_trans 'No hay usuarios para exportar')${cor[reset]}"
+        msg_bar; read -p "Enter"; return 1
+    fi
+    {
+        echo "# Exportación de usuarios - $(date)"
+        echo "# Formato: usuario|contraseña|fecha_exp|límite"
+        echo "# ---------------------------------------------"
+        cat "${USRdatabase}"
+    } > "$export_file"
+    echo -e "${cor[green]}✔ $(fun_trans 'Exportado a'): ${cor[yellow]}$export_file${cor[reset]}"
+    log_message "INFO" "EXPORT: file=$export_file"
+    msg_bar; read -p "Enter"
+}
+
+import_users() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'IMPORTAR USUARIOS')                 ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    echo -e "${cor[yellow]}$(fun_trans 'Formato: usuario|contraseña|fecha_exp|límite')${cor[reset]}"
+    msg_bar
+    local file_path
+    while [[ ! -f "$file_path" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Ruta del archivo'): ${cor[reset]}"
+        read file_path
+        [[ ! -f "$file_path" ]] && echo -e "${cor[red]}✘ $(fun_trans 'Archivo no encontrado')${cor[reset]}"
+    done
+    msg_bar
+    echo -ne "${cor[yellow]}➤ $(fun_trans 'Sobrescribir existentes')? [S/N]: ${cor[reset]}"
+    read overwrite
+    local success=0 failed=0 total=0
+    while IFS='|' read -r user pass date_exp limit; do
+        [[ -z "$user" || "$user" =~ ^#.*$ ]] && continue
+        ((total++))
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Procesando') $user... ${cor[reset]}"
+        if id "$user" &>/dev/null; then
+            if [[ "$overwrite" =~ ^[sS]$ ]]; then
+                userdel --force "$user" 2>/dev/null
+            else
+                echo -e "${cor[orange]}⏭ $(fun_trans 'Saltado')${cor[reset]}"
+                continue
+            fi
+        fi
+        local now_sec=$(date +%s)
+        local exp_sec=$(date +%s --date="$date_exp" 2>/dev/null)
+        if [[ -z "$exp_sec" || "$exp_sec" -le "$now_sec" ]]; then
+            local days=30
+        else
+            local days=$(( (exp_sec - now_sec) / 86400 ))
+        fi
+        if add_user "$user" "$pass" "$days" "$limit" 2>/dev/null; then
+            echo -e "${cor[green]}✔ OK${cor[reset]}"; ((success++))
+        else
+            echo -e "${cor[red]}✘ FAIL${cor[reset]}"; ((failed++))
+        fi
+    done < "$file_path"
+    msg_bar
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'RESUMEN DE IMPORTACIÓN')        ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Total'): ${cor[green]}$total${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Éxitos'): ${cor[green]}$success${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Fallos'): ${cor[red]}$failed${cor[reset]}"
+    log_message "INFO" "IMPORT: total=$total success=$success failed=$failed"
+    msg_bar; read -p "Enter"
+}
+
+create_multiple_users() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'CREAR MÚLTIPLES USUARIOS')             ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    echo -e "${cor[yellow]}$(fun_trans 'Formato: usuario:contraseña:días:límite')${cor[reset]}"
+    echo -e "${cor[green]}Ejemplo: user1:pass123:30:2${cor[reset]}"
+    msg_bar
+    local file_path
+    while [[ ! -f "$file_path" ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Ruta del archivo'): ${cor[reset]}"
+        read file_path
+        [[ ! -f "$file_path" ]] && echo -e "${cor[red]}✘ $(fun_trans 'Archivo no encontrado')${cor[reset]}"
+    done
+    local success=0 failed=0 total=0
+    while IFS=: read -r user pass days limit; do
+        [[ -z "$user" ]] && continue
+        ((total++))
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Creando') $user... ${cor[reset]}"
+        if add_user "$user" "$pass" "$days" "$limit" 2>/dev/null; then
+            echo -e "${cor[green]}✔ OK${cor[reset]}"; ((success++))
+        else
+            echo -e "${cor[red]}✘ FAIL${cor[reset]}"; ((failed++))
+        fi
+    done < "$file_path"
+    msg_bar
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'RESUMEN DE CREACIÓN')        ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Total'): ${cor[green]}$total${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Éxitos'): ${cor[green]}$success${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Fallos'): ${cor[red]}$failed${cor[reset]}"
+    log_message "INFO" "CREATE_MULTIPLE: total=$total success=$success failed=$failed"
+    msg_bar; read -p "Enter"
+}
+
+create_user_auto() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'CREAR USUARIO CON CONTRASEÑA AUTO')      ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local username
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Nombre de usuario'): ${cor[reset]}"
+        read username
+        local valid=$(validate_username "$username")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    local password=$(generate_secure_password 16)
+    local days
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Días de duración'): ${cor[reset]}"
+        read days
+        local valid=$(validate_days "$days")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    local limit
+    while true; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Límite de conexión'): ${cor[reset]}"
+        read limit
+        local valid=$(validate_limit "$limit")
+        [[ "$valid" == "VALID" ]] && break || show_error "$valid"
+    done
+    msg_bar
+    add_user "$username" "$password" "$days" "$limit"
+    if [[ $? -eq 0 ]]; then
+        echo -e "${cor[green]}✔ $(fun_trans 'Usuario creado')${cor[reset]}"
+        echo ""
+        echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+        echo -e "${cor[cyan]}║      $(fun_trans 'CREDENCIALES')               ║${cor[reset]}"
+        echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+        echo -e "${cor[yellow]}➤ $(fun_trans 'Usuario'): ${cor[green]}$username${cor[reset]}"
+        echo -e "${cor[yellow]}➤ $(fun_trans 'Contraseña'): ${cor[green]}$password${cor[reset]}"
+        echo -e "${cor[yellow]}➤ $(fun_trans 'Días'): ${cor[green]}$days${cor[reset]}"
+        echo -e "${cor[yellow]}➤ $(fun_trans 'Expira'): ${cor[green]}$(date "+%F" -d "+ $days days")${cor[reset]}"
+        echo -e "${cor[yellow]}➤ $(fun_trans 'Límite'): ${cor[green]}$limit${cor[reset]}"
+        echo -e "${cor[cyan]}═══════════════════════════════════════════${cor[reset]}"
+        log_message "INFO" "CREATE_AUTO: $username"
+    else
+        echo -e "${cor[red]}✘ $(fun_trans 'Error al crear')${cor[reset]}"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+user_statistics() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'ESTADÍSTICAS DE USUARIOS')           ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local total_users=0 active=0 expired=0 unlimited=0 total_conn=0
+    while read user; do
+        ((total_users++))
+        local status=$(get_user_status "$user")
+        local conn=$(get_user_connections "$user")
+        ((total_conn += conn))
+        case "$status" in active) ((active++)) ;; expired) ((expired++)) ;; unlimited) ((unlimited++)) ;; esac
+    done <<< "$(mostrar_usuarios)"
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'RESUMEN')                    ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Total'): ${cor[green]}$total_users${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Activos'): ${cor[green]}$active${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Expirados'): ${cor[red]}$expired${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Ilimitados'): ${cor[purple]}$unlimited${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Conexiones totales'): ${cor[cyan]}$total_conn${cor[reset]}"
+    [[ $total_users -gt 0 ]] && echo -e "${cor[yellow]}➤ $(fun_trans 'Promedio'): ${cor[cyan]}$((total_conn / total_users))${cor[reset]}"
+    msg_bar
+    echo -e "${cor[cyan]}$(fun_trans 'TOP 5 USUARIOS POR CONEXIONES')${cor[reset]}"
+    msg_bar
+    local user_list=""
+    while read user; do
+        local conn=$(get_user_connections "$user")
+        local line=$(get_user_info "$user")
+        local limit=$(echo "$line" | cut -d'|' -f4)
+        local status=$(get_user_status "$user")
+        local days=$(get_days_remaining "$user")
+        user_list+="${user}|${conn}|${limit}|${status}|${days}\n"
+    done <<< "$(mostrar_usuarios)"
+    echo -e "$user_list" | sort -t'|' -k2 -nr | head -5 | while IFS='|' read -r u c l s d; do
+        local icon=""
+        case "$s" in active) icon="${cor[green]}●${cor[reset]}" ;; expired) icon="${cor[red]}●${cor[reset]}" ;; unlimited) icon="${cor[purple]}●${cor[reset]}" ;; esac
+        printf "${cor[yellow]}%-15s ${cor[cyan]}%3s ${cor[green]}%-4s ${cor[white]}%3s ${icon}\n" "$u" "$c" "/$l" "$d días"
+    done
+    msg_bar; read -p "Enter"
+}
+
+force_verification() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'VERIFICACIÓN MANUAL')                 ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    echo -e "${cor[yellow]}$(fun_trans 'Ejecutando verificación...')${cor[reset]}"
+    local TimeNOW=$(date +%s)
+    local expired_count=0
+    while read user; do
+        local DataUser=$(get_user_expiry "$user")
+        [[ -z "$DataUser" || "$DataUser" == "never" ]] && continue
+        local DataSEC=$(date +%s --date="$DataUser" 2>/dev/null)
+        if [[ "$DataSEC" -lt "$TimeNOW" ]]; then
+            usermod -L "$user" 2>/dev/null
+            ((expired_count++))
+            echo -e "${cor[red]}✘ $(fun_trans 'Expirado') $user${cor[reset]}"
+        fi
+    done <<< "$(mostrar_usuarios)"
+    local limit_violations=0
+    while read user; do
+        local TotalPID=$(get_user_connections "$user")
+        if [[ $TotalPID -gt 0 ]]; then
+            local line=$(get_user_info "$user")
+            local limit=$(echo "$line" | cut -d'|' -f4)
+            if [[ -n "$limit" && "$limit" =~ ^[0-9]+$ && "$TotalPID" -gt "$limit" ]]; then
+                local kill_count=$((TotalPID - limit))
+                local pids=$(ps aux 2>/dev/null | grep -v grep | grep -E "(sshd|dropbear|openvpn)" | grep -w "$user" | awk '{print $2}' | tail -n "$kill_count")
+                for pid in $pids; do kill -9 "$pid" 2>/dev/null; done
+                usermod -L "$user" 2>/dev/null
+                ((limit_violations++))
+                echo -e "${cor[red]}✘ $(fun_trans 'Límite excedido') $user (${TotalPID}/${limit})${cor[reset]}"
+            fi
+        fi
+    done <<< "$(mostrar_usuarios)"
+    msg_bar
+    echo -e "${cor[cyan]}╔═══════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'RESUMEN')                    ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚═══════════════════════════════════════════╝${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Expirados'): ${cor[red]}$expired_count${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Violaciones'): ${cor[red]}$limit_violations${cor[reset]}"
+    echo -e "${cor[yellow]}➤ $(fun_trans 'Activos'): ${cor[green]}$(ps aux 2>/dev/null | grep -E "(sshd|dropbear|openvpn)" | grep -v grep | awk '{print $1}' | sort -u | wc -l)${cor[reset]}"
+    log_message "INFO" "FORCE_VERIFICATION: expired=$expired_count violations=$limit_violations"
+    msg_bar; read -p "Enter"
+}
+
+verif_funx() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║      $(fun_trans 'VERIFICACIÓN DE USUARIOS')             ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+    local PIDVRF=$(ps aux 2>/dev/null | grep "user verificar" | grep -v grep | awk '{print $2}')
+    if [[ -z "$PIDVRF" ]]; then
+        screen -dmS very $0 verificar 2>/dev/null
+        echo -e "${cor[green]}✔ $(fun_trans 'Verificación iniciada')${cor[reset]}"
+        log_message "INFO" "VERIFICATION started"
+    else
+        for pid in $PIDVRF; do kill -9 "$pid" &>/dev/null; done
+        for USR in $(mostrar_usuarios); do usermod -U "$USR" 2>/dev/null; done
+        [[ -e USRonlines ]] && rm USRonlines
+        [[ -e USRexpired ]] && rm USRexpired
+        echo -e "${cor[red]}✘ $(fun_trans 'Verificación detenida')${cor[reset]}"
+        log_message "INFO" "VERIFICATION stopped"
+    fi
+    msg_bar; read -p "Enter"
+}
+
+# -------------------- NUEVA FUNCIÓN BANNER (sin ASCII art, solo colores) --------------------
+baner_fun() {
+    clear
+    echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+    echo -e "${cor[cyan]}║         $(fun_trans 'BANNER SSH')                     ║${cor[reset]}"
+    echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+    msg_bar
+
+    local banner_file=""
+    if [[ -f "/etc/ssh/sshd_config" ]]; then
+        banner_file=$(grep -v "^#" /etc/ssh/sshd_config | grep "Banner" | awk '{print $2}' | head -1)
+    fi
+    [[ -z "$banner_file" ]] && banner_file="/etc/bannerssh"
+
+    echo -e "${cor[yellow]}$(fun_trans 'Banner actual')${cor[reset]}"
+    msg_bar
+    if [[ -f "$banner_file" ]]; then
+        # Mostrar sin etiquetas HTML (ya que ahora solo guardamos texto plano con colores ANSI)
+        head -10 "$banner_file" 2>/dev/null | while read line; do
+            echo -e "$line"
+        done
+        local total_lines=$(wc -l < "$banner_file" 2>/dev/null)
+        [[ $total_lines -gt 10 ]] && echo -e "${cor[orange]}... ($(fun_trans 'más líneas'))${cor[reset]}"
+    else
+        echo -e "${cor[orange]}$(fun_trans 'No hay banner configurado')${cor[reset]}"
+    fi
+    msg_bar
+
+    echo -e "${cor[green]}[1] ${cor[white]}$(fun_trans 'CREAR NUEVO BANNER')${cor[reset]}"
+    echo -e "${cor[green]}[2] ${cor[white]}$(fun_trans 'ELIMINAR BANNER')${cor[reset]}"
+    echo -e "${cor[green]}[3] ${cor[white]}$(fun_trans 'VER BANNER COMPLETO')${cor[reset]}"
+    msg_bar
+
+    local selection
+    while [[ ! "$selection" =~ ^[1-3]$ ]]; do
+        echo -ne "${cor[yellow]}➤ $(fun_trans 'Opción'): ${cor[reset]}"
+        read selection
+    done
+
+    case $selection in
+        1)
+            local main_msg=""
+            echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje principal'): ${cor[reset]}"
+            read main_msg
+
+            echo -e "${cor[green]}[1] Verde${cor[reset]}"
+            echo -e "${cor[red]}[2] Rojo${cor[reset]}"
+            echo -e "${cor[blue]}[3] Azul${cor[reset]}"
+            echo -e "${cor[yellow]}[4] Amarillo${cor[reset]}"
+            echo -e "${cor[purple]}[5] Morado${cor[reset]}"
+            echo -e "${cor[cyan]}[6] Cian${cor[reset]}"
+            echo -ne "${cor[yellow]}➤ $(fun_trans 'Color'): ${cor[reset]}"
+            read color_opt
+
+            # Elegir el código ANSI
+            local color_code="${cor[blue]}"  # default
+            case $color_opt in
+                1) color_code="${cor[green]}" ;;
+                2) color_code="${cor[red]}" ;;
+                3) color_code="${cor[blue]}" ;;
+                4) color_code="${cor[yellow]}" ;;
+                5) color_code="${cor[purple]}" ;;
+                6) color_code="${cor[cyan]}" ;;
+            esac
+
+            # Crear banner sin etiquetas HTML, solo texto con colores ANSI
+            {
+                echo -e "${cor[cyan]}═══════════════════════════════════════════${cor[reset]}"
+                echo -e "${color_code}$main_msg${cor[reset]}"
+                echo -e "${cor[cyan]}═══════════════════════════════════════════${cor[reset]}"
+            } > "$banner_file"
+
+            # Mensajes secundarios (opcionales)
+            while true; do
+                echo -ne "${cor[yellow]}$(fun_trans 'Agregar mensaje secundario?') [S/N]: ${cor[reset]}"
+                read sin_nao
+                if [[ "$sin_nao" =~ ^[sS]$ ]]; then
+                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Mensaje secundario'): ${cor[reset]}"
+                    read sub_msg
+                    echo -e "${cor[green]}[1] Verde${cor[reset]}"
+                    echo -e "${cor[red]}[2] Rojo${cor[reset]}"
+                    echo -e "${cor[blue]}[3] Azul${cor[reset]}"
+                    echo -e "${cor[yellow]}[4] Amarillo${cor[reset]}"
+                    echo -e "${cor[purple]}[5] Morado${cor[reset]}"
+                    echo -e "${cor[cyan]}[6] Cian${cor[reset]}"
+                    echo -ne "${cor[yellow]}➤ $(fun_trans 'Color'): ${cor[reset]}"
+                    read sub_color_opt
+                    local sub_color="${cor[red]}"
+                    case $sub_color_opt in
+                        1) sub_color="${cor[green]}" ;;
+                        2) sub_color="${cor[red]}" ;;
+                        3) sub_color="${cor[blue]}" ;;
+                        4) sub_color="${cor[yellow]}" ;;
+                        5) sub_color="${cor[purple]}" ;;
+                        6) sub_color="${cor[cyan]}" ;;
+                    esac
+                    echo -e "${sub_color}$sub_msg${cor[reset]}" >> "$banner_file"
+                elif [[ "$sin_nao" =~ ^[nN]$ ]]; then
+                    break
+                fi
+            done
+
+            echo -e "${cor[green]}✔ $(fun_trans 'Banner creado con éxito')${cor[reset]}"
+            log_message "INFO" "BANNER created"
+            ;;
+        2)
+            rm -f "$banner_file" 2>/dev/null
+            echo -e "${cor[red]}✘ $(fun_trans 'Banner eliminado')${cor[reset]}"
+            log_message "INFO" "BANNER removed"
+            ;;
+        3)
+            clear
+            echo -e "${cor[cyan]}╔════════════════════════════════════════════════════╗${cor[reset]}"
+            echo -e "${cor[cyan]}║         $(fun_trans 'BANNER COMPLETO')                ║${cor[reset]}"
+            echo -e "${cor[cyan]}╚════════════════════════════════════════════════════╝${cor[reset]}"
+            msg_bar
+            if [[ -f "$banner_file" ]]; then
+                cat "$banner_file" 2>/dev/null
+            else
+                echo -e "${cor[orange]}$(fun_trans 'No hay banner')${cor[reset]}"
+            fi
+            msg_bar
+            ;;
+    esac
+
+    # Reiniciar servicios SSH
+    service ssh restart 2>/dev/null
+    service sshd restart 2>/dev/null
+    service dropbear restart 2>/dev/null
+
+    msg_bar
+    read -p "$(fun_trans 'Presione Enter para continuar')"
+}
+
+# -------------------- MENÚ PRINCIPAL --------------------
+gestionar_usuarios() {
+    local VERY="$(ps aux 2>/dev/null | grep "user verificar" | grep -v grep)"
+    local verificar_status=""
+    [[ -z ${VERY} ]] && verificar_status="${cor[red]}● Off${cor[reset]}" || verificar_status="${cor[green]}● On${cor[reset]}"
+
+    if [[ -z ${VERY} ]]; then
+        screen -dmS very $0 verificar 2>/dev/null
+    fi
+
+    while true; do
+        clear
+        echo -e "$barra_doble"
+        echo -e "${cor[purple]}▣ $(fun_trans 'GESTIÓN DE USUARIOS') ${cor[cyan]}VPS-BARBA v3.0${cor[reset]}"
+        echo -e "$barra_doble"
+        echo -e "${cor[green]}📊 $(fun_trans 'Verificación') $verificar_status ${cor[reset]}"
+        echo -e "$barra"
+        echo -e "${cor[cyan]}📋 $(fun_trans 'GESTIÓN BÁSICA')${cor[reset]}"
+        echo -e "${cor[green]}  [01] ${cor[white]}$(fun_trans 'CREAR NUEVO USUARIO')${cor[reset]}"
+        echo -e "${cor[green]}  [02] ${cor[white]}$(fun_trans 'ELIMINAR USUARIO')${cor[reset]}"
+        echo -e "${cor[green]}  [03] ${cor[white]}$(fun_trans 'EDITAR USUARIO')${cor[reset]}"
+        echo -e "${cor[green]}  [04] ${cor[white]}$(fun_trans 'RENOVAR USUARIO')${cor[reset]}"
+        echo -e "${cor[green]}  [05] ${cor[white]}$(fun_trans 'CAMBIAR CONTRASEÑA')${cor[reset]}"
+        echo -e "${cor[yellow]}📊 $(fun_trans 'MONITOREO Y ESTADÍSTICAS')${cor[reset]}"
+        echo -e "${cor[green]}  [06] ${cor[white]}$(fun_trans 'DETALLES DE TODOS LOS USUARIOS')${cor[reset]}"
+        echo -e "${cor[green]}  [07] ${cor[white]}$(fun_trans 'MONITOR DE USUARIOS CONECTADOS')${cor[reset]}"
+        echo -e "${cor[green]}  [08] ${cor[white]}$(fun_trans 'ESTADÍSTICAS DE USUARIOS')${cor[reset]}"
+        echo -e "${cor[red]}⚡ $(fun_trans 'ACCIONES AVANZADAS')${cor[reset]}"
+        echo -e "${cor[green]}  [09] ${cor[white]}$(fun_trans 'ELIMINAR USUARIOS EXPIRADOS')${cor[reset]}"
+        echo -e "${cor[green]}  [10] ${cor[white]}$(fun_trans 'KILL DE CONEXIONES')${cor[reset]}"
+        echo -e "${cor[green]}  [11] ${cor[white]}$(fun_trans 'BANEAR USUARIO')${cor[reset]}"
+        echo -e "${cor[green]}  [12] ${cor[white]}$(fun_trans 'DESBANEAR USUARIO')${cor[reset]}"
+        echo -e "${cor[purple]}🔄 $(fun_trans 'IMPORTAR/EXPORTAR')${cor[reset]}"
+        echo -e "${cor[green]}  [13] ${cor[white]}$(fun_trans 'EXPORTAR USUARIOS')${cor[reset]}"
+        echo -e "${cor[green]}  [14] ${cor[white]}$(fun_trans 'IMPORTAR USUARIOS')${cor[reset]}"
+        echo -e "${cor[green]}  [15] ${cor[white]}$(fun_trans 'CREAR MÚLTIPLES USUARIOS')${cor[reset]}"
+        echo -e "${cor[green]}  [16] ${cor[white]}$(fun_trans 'CREAR CON CONTRASEÑA AUTO')${cor[reset]}"
+        echo -e "${cor[blue]}🔧 $(fun_trans 'HERRAMIENTAS ADICIONALES')${cor[reset]}"
+        echo -e "${cor[green]}  [17] ${cor[white]}$(fun_trans 'BANNER SSH')${cor[reset]}"
+        echo -e "${cor[green]}  [18] ${cor[white]}$(fun_trans 'VERIFICACIÓN DE USUARIOS')${cor[reset]}"
+        echo -e "${cor[green]}  [19] ${cor[white]}$(fun_trans 'VERIFICACIÓN MANUAL')${cor[reset]}"
+        echo -e "$barra"
+        echo -e "${cor[red]}  [00] ${cor[white]}$(fun_trans 'VOLVER AL MENÚ PRINCIPAL')${cor[reset]}"
+        echo -e "$barra"
+        echo -ne "${cor[cyan]}➤ $(fun_trans 'Seleccione una opción'): ${cor[reset]}"
+        read selection
+
+        case ${selection} in
+            01|1) new_user ;;
+            02|2) remove_user_interactive ;;
+            03|3) edit_user_interactive ;;
+            04|4) renew_user_interactive ;;
+            05|5) change_user_password_interactive ;;
+            06|6) detail_user ;;
+            07|7) monit_user ;;
+            08|8) user_statistics ;;
+            09|9) clean_expired_users ;;
+            10) kill_user_connections_interactive ;;
+            11) ban_user_interactive ;;
+            12) unban_user_interactive ;;
+            13) export_users ;;
+            14) import_users ;;
+            15) create_multiple_users ;;
+            16) create_user_auto ;;
+            17) baner_fun ;;
+            18) verif_funx ;;
+            19) force_verification ;;
+            00|0) source menu ;;
+            *) echo -e "${cor[red]}✘ $(fun_trans 'Opción inválida')${cor[reset]}"; sleep 2 ;;
+        esac
+    done
+}
+
+# -------------------- ARRANQUE --------------------
+if [[ "$1" == "verificar" ]]; then
+    verif_fun
+    exit 0
+fi
+
+[[ ! -f "$LOG_FILE" ]] && touch "$LOG_FILE"
+log_message "INFO" "===== Inicio de gestión de usuarios v3.0 ====="
+gestionar_usuarios
