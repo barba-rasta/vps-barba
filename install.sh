@@ -178,11 +178,11 @@ banner_art() {
 # BARRA DE SEPARACIÓN
 # ───────────────────────────────────────────────────────────────
 barra() {
-    echo -e "${BLUE}▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬${R}"
+    echo -e "${BLUE}▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬${R}"
 }
 
 # ───────────────────────────────────────────────────────────────
-# MOSTRAR BANNER COMPLETO (se mantiene visible durante toda la instalación)
+# MOSTRAR BANNER COMPLETO
 # ───────────────────────────────────────────────────────────────
 show_full_banner() {
     clear
@@ -242,7 +242,6 @@ fun_bar() {
         sleep 0.1
     done
 
-    # Completar barra
     local bar=""
     for ((i=0; i<total; i++)); do bar+="${GREEN}█${R}"; done
     printf "\r${CYAN}[${R}%s${CYAN}]${R} ${WHITE}%s ${GREEN}%3d%%${R} ${GREEN}✓${R}\n" "$bar" "$msg" "100"
@@ -375,7 +374,6 @@ install_dependencies() {
         install_pkg "$pkg" "$(fun_trans installing) $msg"
     done
 
-    # Instalar lolcat
     if ! command -v lolcat &> /dev/null; then
         gem install lolcat > /dev/null 2>&1 &
         spin $! "$(fun_trans installing) Lolcat"
@@ -422,7 +420,6 @@ download_scripts() {
         sleep 0.5
     done
 
-    # Crear symlink para menu si no existe
     if [[ ! -f /usr/local/bin/menu ]]; then
         ln -sf /bin/menu /usr/local/bin/menu 2>/dev/null || true
     fi
@@ -446,16 +443,15 @@ cleanup() {
 }
 
 # ───────────────────────────────────────────────────────────────
-# ANIMACIÓN FINAL - JORGE BAɓBA
+# ANIMACIÓN FINAL
 # ───────────────────────────────────────────────────────────────
 final_animation() {
     clear
     barra
 
     local colors=($RED $GREEN $YELLOW $BLUE $MAGENTA $CYAN $ORANGE $PINK)
-    local text="JORGE BAɓBA"
+    local text="JORGE BARBA"
 
-    # Animación de entrada
     for ((i=0; i<5; i++)); do
         clear
         barra
@@ -468,7 +464,6 @@ final_animation() {
         sleep 0.3
     done
 
-    # Mostrar con lolcat
     clear
     barra
     echo ""
@@ -485,11 +480,11 @@ final_animation() {
 show_final_message() {
     show_full_banner
 
-    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════╗${R}"
+    echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════╗${R}"
     echo -e "${GREEN}${BOLD}║                                                              ║${R}"
     echo -e "${GREEN}${BOLD}║     $(fun_trans install_complete) ✓                           ║${R}"
     echo -e "${GREEN}${BOLD}║                                                              ║${R}"
-    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════╝${R}"
+    echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════╝${R}"
     echo ""
 
     cowthink -f tux "$(fun_trans enter_menu)" 2>/dev/null | lolcat 2>/dev/null || \
@@ -498,7 +493,6 @@ show_final_message() {
     echo ""
     barra
 
-    # Notificar por Telegram
     telegram_notify "✅ <b>VPS-BARBA</b> instalado correctamente en $(hostname -I | awk '{print $1}')"
 }
 
@@ -506,36 +500,26 @@ show_final_message() {
 # FUNCIÓN PRINCIPAL
 # ───────────────────────────────────────────────────────────────
 main() {
-    # Inicializar log
     exec > >(tee -a "$LOG_FILE") 2>&1
 
-    # Verificaciones
     check_root
     check_os
 
-    # Mostrar banner inicial
     show_full_banner
     echo -e "${CYAN}${BOLD}$(fun_trans welcome)${R}\n"
     sleep 1
 
-    # Ejecutar pasos de instalación
     update_system
     install_dependencies
     configure_services
     download_scripts
     cleanup
 
-    # Animación final
     final_animation
 
-    # Mensaje final
     show_final_message
 
-    # Limpiar log
     rm -f "$LOG_FILE"
 }
 
-# ───────────────────────────────────────────────────────────────
-# EJECUTAR
-# ───────────────────────────────────────────────────────────────
 main "$@"
